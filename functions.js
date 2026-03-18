@@ -1,6 +1,6 @@
 // insert personal mapbox token -- currently using mine (Kelly) but will need to be updated by a company-wide account or something
 // maybe there's one designated person or account managed by USI that has a token for running the map 
-mapboxgl.accessToken = 'pk.eyJ1Ijoia2VsbHlrZWxseTciLCJhIjoiY202aWNjdDE5MDcwbTJrcHppYWw5ZjJzcCJ9.pry2p-gu8qXteiF0TWa4dw'
+mapboxgl.accessToken = 'pk.eyJ1IjoidXJiYW5zdHJhdGVnaWVzY29tIiwiYSI6InljWUI3bjgifQ.7FnHhzEC3LnGKjzYaYSZ1A'
 
 // create a new map variable constant
 const map = new mapboxgl.Map({
@@ -10,7 +10,7 @@ const map = new mapboxgl.Map({
     projection: 'mercator',
     // style code sets the base map -- presently streets with Toronto's neighbourhoods polygon
     // can change style to no polygon on Toronto
-    style: 'mapbox://styles/kellykelly7/cmiexrzr9005n01qteivxh01o',
+    style: 'mapbox://styles/urbanstrategiescom/cmmw86cyz004s01s65q2lgak3',
     // center of the map -- this is the centerpoint of the desired location
     // might change to world map, so will need to change this set of coordinates too
     center: [-79.357577, 43.721446],
