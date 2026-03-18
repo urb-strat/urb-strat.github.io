@@ -8,7 +8,7 @@ const map = new mapboxgl.Map({
     container: 'map',
     // set projection (CRS) for web map
     projection: 'mercator',
-    // style code sets the base map -- presently streets with Toronto's neighbourhoods polygon
+    // style code sets the base map -- current just streets, no polygons
     // can change style to no polygon on Toronto
     style: 'mapbox://styles/urbanstrategiescom/cmmw86cyz004s01s65q2lgak3',
     // center of the map -- this is the centerpoint of the desired location
