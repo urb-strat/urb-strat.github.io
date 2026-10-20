@@ -1,0 +1,179 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>USI PROJECT DATABASE</title>
+    <script src = 'https://api.mapbox.com/mapbox-gl-js/v3.9.4/mapbox-gl.js'></script>
+    <link href = 'https://api.mapbox.com/mapbox-gl-js/v3.9.4/mapbox-gl.css' rel = 'stylesheet' />
+    <script src="https://api.mapbox.com/mapbox-gl-js/plugins/mapbox-gl-geocoder/v5.0.3/mapbox-gl-geocoder.min.js"></script>
+    <link rel="stylesheet"
+        href="https://api.mapbox.com/mapbox-gl-js/plugins/mapbox-gl-geocoder/v5.0.3/mapbox-gl-geocoder.css"
+        type="text/css">
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet"integrity="sha384-QWTKZyjpPEjISv5WaRU9OFeRpok6YctnYmDr5pNlyT2bRjXh0JMhjY6hW+ALEwIH" crossorigin="anonymous">
+   <!-- JQuery -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jquery/3.7.1/jquery.min.js" integrity="sha512-v2CJ7UaYy4JwqLDIrZUI/4hqeoQieOmAZNXBeQyjo21dadnwR+8ZaIJVT8EE2iyI61OV8e6M8PP2/4hpQINQ/g==" crossorigin="anonymous" referrerpolicy="no-referrer"></script>
+    
+    <!-- Select2 -->
+    <script src="https://cdn.jsdelivr.net/npm/select2@4.1.0-rc.0/dist/js/select2.min.js"></script>
+
+    <!-- Select2 for dropdown -->
+    <link href="https://cdn.jsdelivr.net/npm/select2@4.1.0-rc.0/dist/css/select2.min.css" rel="stylesheet"/>
+    <link rel='stylesheet' href = 'test_style.css'>
+</head>
+<body>
+
+        <!-- Navigation bar -->
+    <nav class="navbar navbar-expand-lg bg-danger" data-bs-theme="dark">
+        <div class="container-fluid">
+            
+            <a class="navbar-brand" href = '#'>
+                <img src = 'usi-logo-fixed.png' width = '90' height = '55' alt = ''>
+            </a>
+
+            <div class="collapse navbar-collapse" id="navbarColor01">
+                <ul class="navbar-nav me-auto">
+                    <!-- Active: Home -->
+                    <li class="nav-item">
+                        <a class="nav-link active" href="data-for-mapping/index.html">Home</a>
+                    </li>
+                    <li class="nav-item">
+                        <a class="nav-link active" href="https://www.urbanstrategies.com/" target="_blank">USI Homepage</a>
+                    </li>
+                    <li class="nav-item">
+                        <a class="nav-link active" href="https://secure.toronto.ca/council/#/highlights" target="_blank">TMMIS</a>
+                    </li>
+                    <li class="nav-item">
+                        <a class="nav-link active" href="https://olt.gov.on.ca/" target="_blank">OLT</a>
+                    </li>
+                    <li class="nav-item">
+                        <a class="nav-link active" href="https://www.toronto.ca/legdocs/bylaws/lawhome.htm">By-law Lookup</a>
+                    </li>
+                    <li class="nav-item">
+                        <a class="nav-link active" href="test_project_form.html" target="_blank">Submit New Project</a>
+                    </li>
+                    <li class="nav-item">
+                        <a class="nav-link active" href="USIDataset_global/index.html" target="_blank">Simplified Global* Dataset</a>
+                    </li>
+            </div>
+        </div>
+    </nav>
+
+    <div id = 'map' class = 'map-container'>
+        <!-- Search container -->
+        <div class = 'map-search-container' id = 'map-search-container'>
+            <div class = 'geocoder' id = 'geocoder'></div>
+        </div>
+        <button type = 'button' class = 'btn btn-primary' id = 'returnbutton'>Clear Filters and Return to Full Extent</button>
+    </div>
+
+    <div class='description' id='description-container'>
+        <h2>Welcome to the USI Project Database!</h2>
+        <ul>
+            <li>Click on a point to view project information.</li>
+            <li>Search or filter for relevant project information.</li>
+            <li>Search and filter can be combined for result precision.</li>
+        </ul>
+    </div>
+
+    <div class = 'project_number_search' id = 'project_number_search'>
+        <label for = 'project_number'><h3>Search by Project Number</h3></label>
+        <input type = 'text' class = 'project_number_input' name = 'project_number' id = 'project_number' placeholder = 'Enter exact project number'>
+    </div>
+
+    <div class = 'project_SY_search' id = 'project_SY_search'>
+        <label for = 'project_start_year'><h3>Search by Project Start Year</h3></label>
+        <input type = 'text' class = 'project_SY_input' name = 'project_SY' id = 'project_SY' placeholder = 'Enter Project Start Year (e.g., 2023)'>
+    </div>
+
+    <div class = 'project_EY_search' id = 'project_EY_search'>
+        <label for = 'project_end_year'><h3>Search by Project End Year</h3></label>
+        <input type = 'text' class = 'project_EY_input' name = 'project_EY' id = 'project_EY' placeholder = 'Enter Project End Year (e.g., 2023)'>
+    </div>
+
+    <div class = 'client_name_search' id = 'client_name_search'>
+        <label for = 'client_name'><h3>Search by Client Name</h3></label>
+        <input type = 'text' class = 'client_searchbar' name = 'client_name' id = 'client_name' placeholder = 'Enter exact client name' list = 'clientNames'>
+        <datalist id = 'clientNames'>
+            <!-- Populated dynamically from GeoJSON data -->
+        </datalist>
+    </div>
+    
+    <div class = 'proj_type_dropdown' id = 'proj_type_dropdown'>
+        <label for = 'proj_type'><h3>Filter by Project Type</h3></label>
+        <select class = 'form-select' id = 'proj_type'>
+            <option value = '' disabled selected>Select project type</option>
+            <option value = 'All'>All</option>
+            <option value = 'Master Planning'>Master Planning</option>
+            <option value = 'Development Approvals'>Development Approvals</option>
+            <option value = 'Community Engagement'>Community Engagement</option>
+            <option value = 'Due Diligence Study'>Due Diligence Study</option>
+            <option value = 'Planning Analysis'>Planning Analysis</option>
+            <option value = 'Transit-Oriented Development'>Transit-Oriented Development</option>
+            <option value = 'Urban Design'>Urban Design</option>
+            <option value = 'N/A'>N/A</option>
+        </select>
+    </div>
+    
+    <div class = 'person_search' id = 'person_search'>
+        <label for = 'people'><h3>Search or Filter by Team Member</h3></label>
+        <select class = 'member_searchbar' name = 'people' id = 'people'>
+            <option value = '' disabled selected>Search by Team Member</option>
+            <option value = 'All'>All</option>    
+            <option value = 'Leigh McGrath'>Leigh McGrath</option>
+            <option value = 'Peter Pantalone'>Peter Pantalone</option>
+            <option value = 'Cyndi Rottenberg-Walker'>Cyndi Rottenberg-Walker</option>
+            <option value = 'Josh Kohler'>Josh Kohler</option>
+            <option value = 'Emily Reisman'>Emily Reisman</option>
+            <option value = 'Christine Fang-Denissov'>Christine Fang-Denissov</option>
+            <option value = 'Michel Trocme'>Michel Trocme</option>
+            <option value = 'Frank Lewinberg'>Frank Lewinberg</option>
+            <option value = 'Lauren Haein An'>Lauren Haein An</option>
+            <option value = 'Andrew Toth'>Andrew Toth</option>
+            <option value = 'Harshitha Damodaran'>Harshitha Damodaran</option>
+            <option value = 'Aya Almaddah'>Aya Almaddah</option>
+            <option value = 'Mona Han'>Mona Han</option>
+            <option value = 'Ning Lin'>Ning Lin</option>
+            <option value = 'Samuel Lozeau'>Samuel Lozeau</option>
+            <option value = 'Benjamin Hoff'>Benjamin Hoff</option>
+            <option value = 'Inger Squires'>Inger Squires</option>
+            <option value = 'Anne Benaroya'>Anne Benaroya</option>
+            <option value = 'Yiwen Zhu'>Yiwen Zhu</option>
+            <option value = 'Josh Reiniger'>Josh Reiniger</option>
+            <option value = 'Josh Neubauer'>Josh Neubauer</option>
+            <option value = 'Julian Del Bel Belluz'>Julian Del Bel Belluz</option>
+            <option value = 'Melanie Hare'>Melanie Hare</option>
+            <option value = 'Craig Lametti'>Craig Lametti</option>
+            <option value = 'Desi Simova'>Desi Simova</option>
+            <option value = 'Dennis Lago'>Dennis Lago</option>
+            <option value = 'Geoff Whittager'>Geoff Whittager</option>
+            <option value = 'Samantha Anderson'>Samantha Anderson</option>
+            <option value = 'Eric Turcotte'>Eric Turcotte</option>
+            <option value = 'Mihaly Szabo'>Mihaly Szabo</option>
+            <option value = 'Yasmin Afshar'>Yasmin Afshar</option>
+            <option value = 'Christie Chin'>Christie Chin</option>
+            <option value = 'Sirous Ghanbarzadeh'>Sirous Ghanbarzadeh</option>
+            <option value = 'James DiPaolo'>James DiPaolo</option>
+            <option value = 'Sean Quin'>Sean Quin</option>
+            <option value = 'Mary Castel'>Mary Castel</option>
+            <option value = 'George Dark'>George Dark</option>
+            <option value = 'Lena Sanz Tovar'>Lena Sanz Tovar</option>
+            <option value = 'Kiera McMaster'>Kiera McMaster</option>
+            <option value = 'Matthew Whittier'>Matthew Whittier</option>
+            <option value = 'Stuart Dow'>Stuart Dow</option>
+            <option value = 'Corals Zheng'>Corals Zheng</option>
+            <option value = 'Sara Eng'>Sara Eng</option>
+            <option value = 'Kenny Lamizana'>Kenny Lamizana</option>
+            <option value = 'Grant Mason'>Grant Mason</option>
+        </select>
+    </div> 
+
+    <div class='map-legend' id='legend'>
+        <h5><b>Project Completion Status</h5>
+    </div>
+
+    <div class = 'proj_data' id = 'proj_data'></div>
+
+    <script type="module" src="test_functions.js"></script>
+</body>
+</html>
