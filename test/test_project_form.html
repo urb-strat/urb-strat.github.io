@@ -63,7 +63,7 @@
             <label for="address6">Address:</label><br>
             <input type="text" id="address6" name="address6" required placeholder="e.g. 65 Front St W, Toronto, Canada">
             <button type="button" id="find-address" class="btn btn-sm btn-outline-secondary">Show on map</button><br>
-            <small>Press Enter or "Show on map" to place the pin. Moving the pin afterwards won't change the address.</small><br>
+            <small>Press Enter or "Show on map" to place the pin or drop a pin and the address fills in.</small><br>
             <small id="find-status"></small><br>
 
             <label><b>Project Site</b></label><br>
@@ -75,6 +75,39 @@
             <label for="LOCATION">Municipality:</label><br>
             <input type="text" id="LOCATION" name="LOCATION" required><br>
             <small>Filled in from the pin. Edit it if it's wrong.</small><br><br>
+
+            <fieldset id="toronto-fields" hidden disabled>
+                <legend>Toronto details</legend>
+
+                <label>Ward
+                    <select name="ward" required>
+                        <option value="">-- Select --</option>
+                        <option>1</option><option>2</option><option>3</option><option>4</option><option>5</option>
+                        <option>6</option><option>7</option><option>8</option><option>9</option><option>10</option>
+                        <option>11</option><option>12</option><option>13</option><option>14</option><option>15</option>
+                        <option>16</option><option>17</option><option>18</option><option>19</option><option>20</option>
+                        <option>21</option><option>22</option><option>23</option><option>24</option><option>25</option>
+                    </select>
+                </label>
+                <label>Approval Type(s) <input name="approval_types" required placeholder="e.g. OPA, ZBA, SPA"></label>
+                <label>Approval Status <input name="approval_status" required></label>
+                <label>Complete/Approval Year <input type="number" name="approval_year" min="1900" max="2100" required></label>
+
+                <label>Residential Units <input type="number" name="residential_units" min="0" step="1" required></label>
+                <label>Affordable Units <input type="number" name="affordable_units" min="0" step="1" required></label>
+                <label>Affordable Units (%) <input type="number" name="affordable_units_pct" min="0" max="100" step="0.1" required></label>
+
+                <label>Min. Non-Residential GFA (m²) <input type="number" name="min_non_res_gfa" min="0" step="any" required></label>
+                <label>Max. Non-Residential GFA (m²) <input type="number" name="max_non_res_gfa" min="0" step="any" required></label>
+                <label>Density (FSI) <input type="number" name="density" min="0" step="any" required></label>
+
+                <label>Height (m) <input type="number" name="height_m" min="0" step="any" required></label>
+                <label>Height (storeys) <input type="number" name="height_st" min="0" step="1" required></label>
+                <label>Site Area (m²) <input type="number" name="site_area_m2" min="0" step="any" required></label>
+
+                <label>By-Law Number <input name="bylaw_number" required></label>
+                <label>Most Recent Report <input name="most_recent_report" required></label>
+            </fieldset>
 
             <label><b>Project Type</b></label><br>
             <input type="checkbox" id="master_planning" name="Project Type" value="Master Planning">
@@ -95,10 +128,10 @@
             <label for="not_available">N/A</label><br>
 
             <br>
-            <label for="client">Client Name(s):</label><br>
+            <label for="client_name">Client Name(s):</label><br>
             <input type="text" id="client_name" name="client" required><br><br>
 
-            <label for="client">Client Type:</label><br>
+            <label for="client_type">Client Type:</label><br>
             <input type="text" id="client_type" name="CLIENT_TYPE" list="client-type-options" autocomplete="off">
             <datalist id="client-type-options"></datalist><br>
             <small>Pick an existing type if one fits, so map filters stay consistent.</small><br><br>

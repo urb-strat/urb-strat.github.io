@@ -34,59 +34,90 @@ function projectStatus(end) {
   return endDate < today ? 'Completed' : 'Ongoing';
 }
 
+// New Supabase columns with no existing map property -- added as UPPERCASE keys (e.g. tod_study -> TOD_STUDY)
+const EXTRA_COLUMNS = [
+  'in_master_db', 'date', 'country', 'on_website', 'archived_not_actively_refreshed',
+  // project focus tags
+  'affordable_housing', 'engagement', 'dev_approval', 'due_diligence', 'economic_strategy',
+  'growth_management', 'master_planning', 'neighbourhood_revitalization', 'downtown_revitalization',
+  'new_cmty_plan', 'official_plan', 'olt_appeal', 'planning_analysis', 'proposal_call_or_competition',
+  'realized_or_built_plans', 'sustainability', 'tod_study', 'transit_oriented_development',
+  'urban_design_guidelines', 'urban_regeneration', 'visioning', 'vendor_of_record', 'zoning_bylaw',
+  'indigenous_or_first_nations',
+  // place type tags
+  'airport', 'brownfield', 'city', 'commercial', 'corridor', 'cultural', 'downtown', 'education',
+  'health_care', 'main_street', 'neighbourhoods', 'park_or_open_space', 'precinct', 'region',
+  'research_or_tech_park', 'residential', 'waterfront',
+  // geocoding info
+  'match_type', 'confidence'
+];
+
+// Convert one Supabase row into a GeoJSON feature (null if coordinates are missing/invalid)
+function rowToFeature(row) {
+  const lon = parseFloat(row.long);
+  const lat = parseFloat(row.lat);
+  if (!Number.isFinite(lon) || !Number.isFinite(lat)) return null;
+
+  const properties = {
+    // existing property names kept so popups, filters and info panel still work
+    PROJECT_NUMBER: row.project_number,
+    "IN TORONTO?": row.in_toronto,
+    PROJECT_NAME: row.project_name,
+    CLIENT_NAME: row.client,
+    CLIENT_TYPE: row.client_type,
+    CENTROID_COORDS: row.centroid_coords,
+    ADDRESS: row.address,
+    PROJECT_TYPE: row.project_type,
+    PROJECT_FOCUS: row.project_focus,
+    MUNICIPALITY: row.municipality,
+    WARD: row.toronto_ward,
+    USI_TEAM_MEMBERS: row.usi_team_members,
+    PRINCIPAL_IN_CHARGE: row.principal_in_charge,
+    PROJECT_MANAGER: row.project_manager,
+    PROJECT_START_YEAR: yearOf(row.project_start_date),
+    PROJECT_END_YEAR: yearOf(row.project_end_date),
+    STATUS: projectStatus(row.project_end_date),
+    APPROVAL_YEAR: row.complete_approval_year,
+    APPROVAL_TYPE: row.approval_types,
+    APPROVAL_STATUS: row.approval_status,
+    RESIDENTIAL_UNITS: row.residential_units,
+    "AFFORDABLE_UNITS_%": row.affordable_units_pct,
+    AFFORDABLE_UNITS: row.affordable_units,
+    MAX_NONRES_GFA: row.max_non_res_gfa,
+    MIN_NONRES_GFA: row.min_non_res_gfa,
+    DENSITY: row.density,
+    HEIGHT_M: row.height_m,
+    HEIGHT_ST: row.height_st,
+    SITE_AREA_M2: row.site_area_m2,
+    BY_LAW_NUM: row.bylaw_number,
+    MOST_RECENT_REPORT: row.most_recent_report,
+    NOTES: row.notes
+  };
+
+  for (const col of EXTRA_COLUMNS) {
+    properties[col.toUpperCase()] = row[col];
+  }
+
+  return {
+    type: "Feature",
+    geometry: { type: "Point", coordinates: [lon, lat] },
+    properties
+  };
+}
+
 if (error) {
   console.error(error);
 } else {
   let skipped = 0;
 
   for (const row of data) {
-    const lon = parseFloat(row.Longitude_New);
-    const lat = parseFloat(row.Latitude_New);
-
+    const feature = rowToFeature(row);
     // Skip rows with missing or invalid coordinates
-    if (!Number.isFinite(lon) || !Number.isFinite(lat)) {
+    if (!feature) {
       skipped++;
       continue;
     }
-
-    geojson.features.push({
-      type: "Feature",
-      geometry: { type: "Point", coordinates: [lon, lat] },
-      properties: {
-        PROJECT_NUMBER: row["PROJECT_NUMBER"],
-        "IN TORONTO?": row["In Toronto?"],
-        PROJECT_NAME: row["PROJECT NAME"],
-        CLIENT_NAME: row["client"],
-        CLIENT_TYPE: row["CLIENT_TYPE"],
-        CENTROID_COORDS: row["CENTROID_COORDS"],
-        ADDRESS: row["address6"],
-        PROJECT_TYPE: row["Project Type"],
-        PROJECT_FOCUS: row["Project Focus"],
-        MUNICIPALITY: row["Municipality/Jurisdiction"],
-        WARD: row["Ward (Toronto)"],
-        USI_TEAM_MEMBERS: row["USI Team Members"],
-        PRINCIPAL_IN_CHARGE: row["Principal in Charge"],
-        PROJECT_MANAGER: row["Project Manager"],
-        PROJECT_START_YEAR: yearOf(row["Project Start Date"]),
-        PROJECT_END_YEAR: yearOf(row["Project End Date"]),
-        STATUS: projectStatus(row["Project End Date"]),
-        APPROVAL_YEAR: row["Complete/Approval Year"],
-        APPROVAL_TYPE: row["Approval type(s)"],
-        APPROVAL_STATUS: row["Approval Status"],
-        RESIDENTIAL_UNITS: row["Residential Units"],
-        "AFFORDABLE_UNITS_%": row["Affordable Units (%)"],
-        AFFORDABLE_UNITS: row["Affordable Units"],
-        MAX_NONRES_GFA: row["Max. Non-Residential GFA"],
-        MIN_NONRES_GFA: row["Min. Non-Residential GFA"],
-        DENSITY: row["Density"],
-        HEIGHT_M: row["Height (m)"],
-        HEIGHT_ST: row["Height (st)"],
-        SITE_AREA_M2: row["Site Area (m2)"],
-        BY_LAW_NUM: row["By-Law Number"],
-        MOST_RECENT_REPORT: row["Most Recent Report"],
-        NOTES: row["NOTES"]
-      }
-    });
+    geojson.features.push(feature);
   }
 
   console.log(`${geojson.features.length} features, ${skipped} skipped`);
@@ -137,7 +168,7 @@ map.touchZoomRotate.enable();
 map.on('load', () => {
     map.addSource('proj-data', {
         type: 'geojson', 
-        // geojson file in folder -- with github, can directly link to this line, not raw file
+        // geojson built from Supabase rows above
         data: geojson
     })
 
@@ -177,41 +208,29 @@ map.on('load', () => {
         Populate Client Names Datalist from GeoJSON
     ===================================================*/
     
-    // Fetch the GeoJSON file and extract all unique client names
-    fetch(geojson)
-        .then(response => response.json())
-        .then(data => {
-            const clientNamesSet = new Set();
-            
-            // Extract all unique client names from features
-            data.features.forEach(feature => {
-                const clientNames = feature.properties.CLIENT_NAME;
-                if (clientNames && Array.isArray(clientNames)) {
-                    clientNames.forEach(name => {
-                        if (name && name.trim()) {
-                            clientNamesSet.add(name.trim());
-                        }
-                    });
-                }
-            });
-            
-            // Populate the datalist with unique client names
-            const clientNamesDatalist = document.getElementById('clientNames');
-            if (clientNamesDatalist) {
-                // Clear existing options
-                clientNamesDatalist.innerHTML = '';
-                
-                // Add options for each unique client name (sorted)
-                Array.from(clientNamesSet).sort().forEach(clientName => {
-                    const option = document.createElement('option');
-                    option.value = clientName;
-                    clientNamesDatalist.appendChild(option);
-                });
-                
-                console.log('Populated datalist with', clientNamesSet.size, 'unique client names');
+    // geojson is already in memory (from Supabase), so no fetch needed
+    const clientNamesSet = new Set();
+    geojson.features.forEach(feature => {
+        const raw = feature.properties.CLIENT_NAME;
+        // client may come back as an array or a single text value
+        const names = Array.isArray(raw) ? raw : (raw ? [raw] : []);
+        names.forEach(name => {
+            if (name && String(name).trim()) {
+                clientNamesSet.add(String(name).trim());
             }
-        })
-        .catch(error => console.error('Error loading GeoJSON for datalist:', error));
+        });
+    });
+
+    const clientNamesDatalist = document.getElementById('clientNames');
+    if (clientNamesDatalist) {
+        clientNamesDatalist.innerHTML = '';
+        Array.from(clientNamesSet).sort().forEach(clientName => {
+            const option = document.createElement('option');
+            option.value = clientName;
+            clientNamesDatalist.appendChild(option);
+        });
+        console.log('Populated datalist with', clientNamesSet.size, 'unique client names');
+    }
 
     /* ===================================================
         Attach Filter Handlers (after layer is created)
@@ -239,20 +258,13 @@ map.on('load', () => {
         applyFilter();
     });
 
-    // Project Number Search
+    // Project Number Search (partial matching handled in buildCombinedFilter)
     $('.project_number_input').on('input', function() {
         var projectNumber = $(this).val().trim();
         activeFilters.projectNumber = projectNumber || null;
         console.log('Project number filter:', projectNumber);
         applyFilter();
     });
-    // Add project number filter if active (updated for partial matches)
-    if (activeFilters.projectNumber) {
-        // Escape special regex characters in the input
-        const escaped = activeFilters.projectNumber.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-        // Use match expression: if the project number contains the input as a substring, include it
-        filters.push(['==', ['match', ['to-string', ['get', 'PROJECT_NUMBER']], new RegExp('.*' + escaped + '.*'), true, false], true]);
-    }    
 
     // Project Type Filter and combine with other filters
     const getProjType = document.getElementById('proj_type');
@@ -362,15 +374,6 @@ map.on('load', () => {
         const coordinates = e.features[0].geometry.coordinates;
         const properties = e.features[0].properties;
 
-        // create dynamic desccription for popup
-        const description = `
-          <div>
-            <h3>${properties.PROJECT_NAME}</h3>
-            <p><strong>Project Number:</strong> ${properties.PROJECT_NUMBER}</p>
-            <p><strong>Address:</strong> ${properties.ADDRESS || 'N/A'}</p>
-          </div>
-        `;
-
         // Zoom into the clicked point
         map.flyTo({
             center: coordinates,
@@ -389,7 +392,6 @@ map.on('load', () => {
             
             // Helper function to safely convert arrays/strings to comma-separated text
             const toText = (val) => {
-                console.log('toText input:', val, typeof val);
                 if (!val) return 'N/A';
                 
                 // If it's a string that looks like JSON array, parse it
@@ -423,13 +425,6 @@ map.on('load', () => {
             const cliType = toText(properties['CLIENT_TYPE']);
             const USIteam = toText(properties['USI_TEAM_MEMBERS']);
             const bylawnum = toText(properties['BY_LAW_NUM']);
-            
-            // debug in DevTools console (F12)
-            console.log('projtype:', projtype);
-            console.log('cliName:', cliName);
-            console.log('cliType:', cliType);
-            console.log('USIteam:', USIteam);
-            console.log('bylawnum:', bylawnum);
             
             // create HTML segments for each field
             const PROJTYPE = `<p><span class="label">Project Type:</span> ${projtype}</p>`
@@ -564,50 +559,39 @@ let activeFilters = {
 function buildCombinedFilter() {
     const filters = [];
     
-    // Add member filter if active
-    // Check if the selected member value appears in the USI_TEAM_MEMBERS array
+    // Check if the selected member value appears in the USI_TEAM_MEMBERS field
     if (activeFilters.member && activeFilters.member !== 'All') {
         filters.push(['in', activeFilters.member, ['get', 'USI_TEAM_MEMBERS']]);
     }
     
-    // Add client name filter if active
-    // Check if the selected client name appears in the CLIENT_NAME array
+    // Check if the selected client name appears in the CLIENT_NAME field
     if (activeFilters.clientName && activeFilters.clientName !== 'All') {
         filters.push(['in', activeFilters.clientName, ['get', 'CLIENT_NAME']]);
     }
 
-    // Add project number filter if active (partial matching)
+    // Project number filter (partial matching)
     if (activeFilters.projectNumber) {
         filters.push(['>=', ['index-of', activeFilters.projectNumber, ['to-string', ['get', 'PROJECT_NUMBER']]], 0]);
     }
     
-    // Add project type filter if active
-    // Check if the selected type appears in the PROJECT_TYPE array
+    // Check if the selected type appears in the PROJECT_TYPE field
     if (activeFilters.projType && activeFilters.projType !== 'All') {
         filters.push(['in', activeFilters.projType, ['get', 'PROJECT_TYPE']]);
     }
     
-    // Add project end year filter if active
+    // Project end year filter
     if (activeFilters.projectEY) {
         filters.push(['==', ['get', 'PROJECT_END_YEAR'], activeFilters.projectEY]);
     }
     
-    // Add project start year filter if active
+    // Project start year filter
     if (activeFilters.projectSY) {
         filters.push(['==', ['get', 'PROJECT_START_YEAR'], activeFilters.projectSY]);
     }
 
-    // If no filters, return null (show all)
-    if (filters.length === 0) {
-        return null;
-    }
-    
-    // If one filter, return it directly
-    if (filters.length === 1) {
-        return filters[0];
-    }
-    
-    // If multiple filters, combine with 'all' (AND logic)
+    if (filters.length === 0) return null;
+    if (filters.length === 1) return filters[0];
+    // multiple filters combined with AND logic
     return ['all', ...filters];
 }
 
@@ -617,14 +601,7 @@ function applyFilter() {
     console.log('Applying combined filter:', combinedFilter);
     
     try {
-        // Use null to show all features, or the filter expression
-        if (combinedFilter === null) {
-            map.setFilter('proj-points', null);
-            console.log('Filter set to null - showing all points');
-        } else {
-            map.setFilter('proj-points', combinedFilter);
-            console.log('Filter applied successfully');
-        }
+        map.setFilter('proj-points', combinedFilter);
     } catch (error) {
         console.error('Error applying filter:', error);
         console.error('Filter expression was:', combinedFilter);

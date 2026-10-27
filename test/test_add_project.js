@@ -16,13 +16,13 @@ const MAP_STYLE = 'mapbox://styles/mapbox/streets-v12';
 const START_CENTER = [-79.3832, 43.6532];     // [lng, lat] — Toronto
 const START_ZOOM = 10;
 
-const LOCATION_FIELD = 'LOCATION';            // name="" of the address input
-const LAT_COLUMN = 'Latitude_New';            // your table's latitude column
-const LNG_COLUMN = 'Longitude_New';           // your table's longitude column
-const SEARCH_SELECTOR = '#address6';           // Address input (saved as address6, also used to place the pin)
-const START_FIELD = 'Project Start Date';
-const END_FIELD = 'Project End Date';
-const CLIENT_TYPE_FIELD = 'CLIENT_TYPE';      // existing values are offered as suggestions
+const LOCATION_FIELD = 'municipality';        // name="" (and id) of the city input
+const LAT_COLUMN = 'lat';                     // your table's latitude column
+const LNG_COLUMN = 'long';                    // your table's longitude column
+const SEARCH_SELECTOR = '#address';           // Address input (saved as address, also used to place the pin)
+const START_FIELD = 'project_start_date';
+const END_FIELD = 'project_end_date';
+const CLIENT_TYPE_FIELD = 'client_type';      // existing values are offered as suggestions
 
 // Checkbox groups (several boxes sharing one name, e.g. project_type):
 // true  -> saved as one text value, "Urban Design, Master Planning"
@@ -134,15 +134,34 @@ export async function findAddress(query) {
   return { lat: Number(r.lat), lng: Number(r.lon), label: r.display_name, city: cityFromAddress(r.address) };
 }
 
-// Coordinates -> city (zoom=10 asks Nominatim for city-level detail)
-export async function cityAt(lat, lng) {
-  const r = await nominatim('reverse', { lat, lon: lng, format: 'jsonv2', zoom: '10', addressdetails: '1' });
-  return cityFromAddress(r.address);
+// Coordinates -> { city, address } (zoom=18 = building-level detail; still includes city)
+export async function placeAt(lat, lng) {
+  const r = await nominatim('reverse', { lat, lon: lng, format: 'jsonv2', zoom: '18', addressdetails: '1' });
+  return { city: cityFromAddress(r.address), address: streetFromAddress(r.address) };
+}
+
+// "65 Front Street West, Toronto" (or "Bay Street, Toronto" if no house number)
+export function streetFromAddress(a = {}) {
+  const street = [a.house_number, a.road].filter(Boolean).join(' ');
+  const city = cityFromAddress(a);
+  return street ? [street, city].filter(Boolean).join(', ') : '';
+}
+
+// Only fills the address if it's empty or was filled by the pin, never over typed text
+const addressInput = document.querySelector(SEARCH_SELECTOR);
+addressInput?.addEventListener('input', () => delete addressInput.dataset.auto);
+function setAddressFromPin(addr) {
+  if (!addressInput || !addr) return;
+  if (addressInput.value.trim() === '' || addressInput.dataset.auto) {
+    addressInput.value = addr;
+    addressInput.dataset.auto = '1';
+  }
 }
 
 function setCity(city) {
   const input = form?.elements[LOCATION_FIELD];
   if (input) input.value = city;
+  toggleToronto();                                 // value set by code doesn't fire 'input'
 }
 
 // Waits until the pin stops moving, then looks up the city once
@@ -155,8 +174,8 @@ function scheduleCityLookup() {
   cityTimer = setTimeout(async () => {
     const at = pin;
     try {
-      const city = await cityAt(at.lat, at.lng);
-      if (pin === at) setCity(city);             // ignore if the pin moved meanwhile
+      const { city, address } = await placeAt(at.lat, at.lng);
+      if (pin === at) { setCity(city); setAddressFromPin(address); }
       if (input && !city) input.placeholder = 'No city found — type it in';
     } catch (err) {
       console.error(err);
@@ -223,6 +242,13 @@ if (form) {
     if (btn) btn.disabled = true;
     try {
       const row = formToRow(form);
+
+      const typedType = row[CLIENT_TYPE_FIELD];
+      if (typedType) {
+        const existing = [...document.querySelectorAll('#client-type-options option')].map(o => o.value);
+        row[CLIENT_TYPE_FIELD] = existing.find(v => v.trim().toLowerCase() === typedType.toLowerCase()) ?? typedType;
+      }
+
       const dateProblem = checkDates(row);
       if (dateProblem) throw new Error(dateProblem);
       row[LAT_COLUMN] = pin.lat;
@@ -231,6 +257,8 @@ if (form) {
       showStatus('Saving…');
       const { error } = await supabase.from(TABLE).insert(row);
       if (error) throw new Error(`Could not save: ${error.message}`);
+
+      loadClientTypes();
 
       showStatus('Project added.');
       form.reset();
@@ -246,3 +274,15 @@ if (form) {
 } else {
   console.warn(`No form found for selector ${FORM_SELECTOR}`);
 }
+
+const loc = form?.elements[LOCATION_FIELD];         // city input
+const tor = document.getElementById("toronto-fields");
+
+function toggleToronto() {
+  if (!loc || !tor) return;
+  const isToronto = loc.value.trim().toLowerCase().startsWith("toronto");
+  tor.hidden = !isToronto;
+  tor.disabled = !isToronto;
+}
+loc?.addEventListener("input", toggleToronto);
+toggleToronto();
