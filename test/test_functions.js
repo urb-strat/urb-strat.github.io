@@ -60,6 +60,7 @@ function rowToFeature(row) {
 
   const properties = {
     // existing property names kept so popups, filters and info panel still work
+    ID: row.ID,                                   // unique row id, used by the Edit button
     PROJECT_NUMBER: row.project_number,
     "IN TORONTO?": row.in_toronto,
     PROJECT_NAME: row.project_name,
@@ -386,6 +387,10 @@ map.on('load', () => {
         if (projInfoDiv) {
             projInfoDiv.innerHTML = '';
 
+            // Edit button (top right) -> edit page for this project's row
+            const editBtn = properties.ID != null
+                ? `<a class="btn btn-sm btn-outline-danger edit-btn" style="float:right; margin:0 0 6px 8px;" href="test_edit_project.html?id=${encodeURIComponent(properties.ID)}">&#9998; Edit</a>`
+                : '';
             const projname = `<p class="proj-name">${properties.PROJECT_NAME || 'N/A'}</p>`;
             const projnum = `<p><span class="label">Project Number:</span> ${properties.PROJECT_NUMBER || 'N/A'}</p>`;
             const address = `<p><span class="label">Address:</span> ${properties.ADDRESS || 'N/A'}</p>`;
@@ -434,7 +439,7 @@ map.on('load', () => {
             const bylaw = `<p><span class="label">By-law Number(s):</span> ${bylawnum}</p>`
 
             // insert info into div and make visible
-            projInfoDiv.innerHTML = projname + projnum + address + PROJTYPE + clientName + clientType + usiteam + bylaw;
+            projInfoDiv.innerHTML = editBtn + projname + projnum + address + PROJTYPE + clientName + clientType + usiteam + bylaw;
             projInfoDiv.style.display = 'block';
             projInfoDiv.classList.add('visible');
             

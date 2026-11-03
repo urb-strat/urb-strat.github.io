@@ -1,4 +1,6 @@
-// add-project.js — "Add project" form: pin-drop location + save to Supabase
+// add-project.js — "Add project" AND "Edit project" form: pin-drop location + save to Supabase
+// Add page:  <form id="add-project-form">  -> inserts a new row
+// Edit page: <form id="edit-project-form"> -> loads the row from ?id=123 in the URL, saves with update
 // Needs in the HTML (in this order):
 //   Mapbox GL JS <script> and <link> in <head>
 //   <script type="module" src="add-project.js"></script> before </body>
@@ -8,7 +10,9 @@ import { createClient } from 'https://cdn.jsdelivr.net/npm/@supabase/supabase-js
 const SUPABASE_URL = 'https://qtbysadfbkootuscgsri.supabase.co';
 const SUPABASE_ANON_KEY = 'sb_publishable_1aGgWjC2uWsKk6AAw6uuKA_AhKzLEQN';   // Project Settings > API (public "anon" key)
 const TABLE = 'Test Table';                     // your table name
-const FORM_SELECTOR = '#add-project-form';    // id of your <form>
+const FORM_SELECTOR = '#add-project-form, #edit-project-form';   // id of your <form> (add or edit page)
+const ID_COLUMN = 'ID';                       // unique row id used in the edit link (?id=...)
+const MAP_PAGE = 'test_index.html';           // "Back to map" link after saving an edit
 const STATUS_SELECTOR = '#form-status';       // optional element for messages
 
 const MAPBOX_TOKEN = 'pk.eyJ1IjoiZW1tZXR0eW91bmciLCJhIjoiY21rNGI3Y3Z4MDV3ZjNrcHk2MXFrYTlpeSJ9.nhnMjjZj_o1eyXtp_Y8Svw'; // same public token the map uses
@@ -44,6 +48,8 @@ const JOIN_GROUPS = true;
 
 const supabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 const form = document.querySelector(FORM_SELECTOR);
+const EDIT_MODE = form?.id === 'edit-project-form';
+const EDIT_ID = new URLSearchParams(location.search).get('id');
 const statusEl = document.querySelector(STATUS_SELECTOR);
 const coordsEl = document.querySelector('#pin-coords');
 const findBtn = document.querySelector('#find-address');
@@ -95,6 +101,10 @@ function setPin(lng, lat, city) {
   if (coordsEl) coordsEl.textContent = `Pin: ${pin.lat}, ${pin.lng} (lat, lng)`;
   if (city !== undefined) setCity(city); else scheduleCityLookup();
   setWard(pin.lng, pin.lat);
+  moveMarker(lng, lat);
+}
+
+function moveMarker(lng, lat) {
   if (!map) return;
   if (!marker) {
     marker = new mapboxgl.Marker({ draggable: true }).setLngLat([lng, lat]).addTo(map);
@@ -102,6 +112,14 @@ function setPin(lng, lat, city) {
   } else {
     marker.setLngLat([lng, lat]);
   }
+}
+
+// Edit page: show the saved location without re-looking up city/ward/address (keeps saved values)
+function placeExistingPin(lng, lat) {
+  pin = { lng: Number(lng.toFixed(6)), lat: Number(lat.toFixed(6)) };
+  if (coordsEl) coordsEl.textContent = `Pin: ${pin.lat}, ${pin.lng} (lat, lng)`;
+  moveMarker(lng, lat);
+  if (map) map.jumpTo({ center: [lng, lat], zoom: 15 });
 }
 
 function clearPin() {
@@ -353,10 +371,14 @@ if (form) {
       const picked = [...form.querySelectorAll('input[name="project_type"]:checked')].map((c) => c.value);
       if (picked.some((v) => v in PROJECT_TYPE_FLAGS)) {
         for (const [type, col] of Object.entries(PROJECT_TYPE_FLAGS)) row[col] = picked.includes(type);
+      } else if (EDIT_MODE) {
+        for (const col of Object.values(PROJECT_TYPE_FLAGS)) row[col] = null;
       }
 
+      if (EDIT_MODE) applyEditRules(row);
+
       row.in_toronto = row[LOCATION_FIELD] ? row[LOCATION_FIELD].toLowerCase().startsWith('toronto') : null;
-      row.date = todayISO();                            // submission date, local time
+      if (!EDIT_MODE) row.date = todayISO();            // submission date, local time (kept as-is when editing)
 
       if (row.min_non_res_gfa != null && row.max_non_res_gfa != null && row.min_non_res_gfa > row.max_non_res_gfa)
         throw new Error('Min. Non-Residential GFA is larger than Max.');
@@ -370,6 +392,16 @@ if (form) {
       row.centroid_coords = `(${pin.lng}, ${pin.lat})`;   // "(long, lat)"
 
       showStatus('Saving…');
+      if (EDIT_MODE) {
+        // .select() returns the changed rows; an empty list means nothing was updated
+        const { data, error } = await supabase.from(TABLE).update(row).eq(ID_COLUMN, EDIT_ID).select(ID_COLUMN);
+        if (error) throw new Error(`Could not save: ${error.message}`);
+        if (!data?.length) throw new Error('Nothing was saved. The project may have been deleted, or the table is missing an UPDATE policy.');
+        loadClientTypes();
+        showStatus('Changes saved.');
+        if (statusEl) statusEl.append(' ', Object.assign(document.createElement('a'), { href: MAP_PAGE, textContent: 'Back to map' }));
+        return;                                         // keep the form filled in
+      }
       const { error } = await supabase.from(TABLE).insert(row);
       if (error) throw new Error(`Could not save: ${error.message}`);
 
@@ -404,3 +436,90 @@ function toggleToronto() {
 }
 loc?.addEventListener("input", toggleToronto);
 toggleToronto();
+
+// ---------- Edit mode: load the saved row and fill the form ----------
+const keepIfBlank = {};          // date fields whose saved value can't show in a date box (e.g. "2019")
+const arrayColumns = new Set();  // columns that came back as lists (text[]) -> saved back as lists
+
+// "A, B" / ["A","B"] / '["A","B"]' -> ['A', 'B']
+export function toList(v) {
+  if (v == null || v === '') return [];
+  if (Array.isArray(v)) return v.map((x) => String(x).trim()).filter(Boolean);
+  const s = String(v).trim();
+  if (s.startsWith('[')) {
+    try { const a = JSON.parse(s); if (Array.isArray(a)) return toList(a); } catch { /* not JSON, split below */ }
+  }
+  return s.split(',').map((x) => x.trim()).filter(Boolean);
+}
+
+// Puts each saved value into the input with the same name="" (the reverse of formToRow)
+export function fillForm(formEl, row) {
+  const groups = {};
+  for (const el of formEl.elements) if (el.name) (groups[el.name] ??= []).push(el);
+
+  for (const [name, els] of Object.entries(groups)) {
+    if (!(name in row)) continue;
+    const val = row[name];
+    const first = els[0];
+
+    if (first.type === 'checkbox') {
+      if (els.length > 1) { const list = toList(val); els.forEach((e) => { e.checked = list.includes(e.value); }); }
+      else first.checked = val === true || val === 'true';
+    } else if (first.type === 'radio') {
+      els.forEach((e) => {
+        e.checked = val != null && String(val) === e.value;
+        if (e.checked) lastPicked.set(name, e);        // so "click again to clear" still works
+      });
+    } else {
+      if (Array.isArray(val)) arrayColumns.add(name);
+      let v = val == null ? '' : Array.isArray(val) ? val.join(', ') : String(val);
+      if (first.type === 'date' && v) {
+        const m = v.match(/^\d{4}-\d{2}-\d{2}/);
+        if (m) v = m[0];
+        else {                                          // e.g. year only from the old dataset
+          keepIfBlank[name] = val;
+          first.required = false;
+          first.after(Object.assign(document.createElement('small'), { textContent: ` Saved as "${v}". Leave blank to keep it, or pick a full date.` }));
+          v = '';
+        }
+      }
+      if (first.tagName === 'SELECT' && v && ![...first.options].some((o) => o.value === v)) {
+        const n = parseInt(v, 10);                     // ward "01" -> "1"
+        if (!isNaN(n)) v = String(n);
+      }
+      first.value = v;
+    }
+  }
+}
+
+// Edit-only fixes so cleared fields really get cleared in the database
+function applyEditRules(row) {
+  for (const el of form.elements) {                     // no Yes/No picked -> NULL (an insert just leaves it out)
+    if (el.type === 'radio' && el.name && !(el.name in row) && !el.matches(':disabled')) row[el.name] = null;
+  }
+  if (tor?.disabled) row.toronto_ward = null;           // moved outside Toronto -> clear the old ward
+  for (const [k, v] of Object.entries(keepIfBlank)) if (row[k] == null) row[k] = v;
+  for (const k of arrayColumns) if (typeof row[k] === 'string') row[k] = toList(row[k]);
+}
+
+async function loadProjectForEdit() {
+  const btn = form.querySelector('[type="submit"]');
+  if (btn) btn.disabled = true;                         // stays off unless the project loads
+  if (!EDIT_ID) { showStatus('No project selected. Open this page with the Edit button on the map.', true); return; }
+
+  showStatus('Loading project…');
+  const { data, error } = await supabase.from(TABLE).select('*').eq(ID_COLUMN, EDIT_ID).maybeSingle();
+  if (error) { showStatus(`Could not load project: ${error.message}`, true); return; }
+  if (!data) { showStatus(`No project with id ${EDIT_ID}. It may have been deleted.`, true); return; }
+
+  fillForm(form, data);
+  toggleToronto();
+  const lng = parseFloat(data[LNG_COLUMN]), lat = parseFloat(data[LAT_COLUMN]);
+  if (Number.isFinite(lng) && Number.isFinite(lat)) placeExistingPin(lng, lat);
+
+  const title = document.querySelector('#edit-title');
+  if (title && data.project_name) title.textContent = `Edit: ${data.project_name}`;
+  showStatus('');
+  if (btn) btn.disabled = false;
+}
+if (form && EDIT_MODE) loadProjectForEdit();
