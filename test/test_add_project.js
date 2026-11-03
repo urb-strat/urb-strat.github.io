@@ -23,6 +23,18 @@ const SEARCH_SELECTOR = '#address';           // Address input (saved as address
 const START_FIELD = 'project_start_date';
 const END_FIELD = 'project_end_date';
 const CLIENT_TYPE_FIELD = 'client_type';      // existing values are offered as suggestions
+// Project Type checkbox value -> matching true/false column (set automatically on submit)
+const PROJECT_TYPE_FLAGS = {
+  'Master Planning': 'master_planning',
+  'Development Approvals': 'dev_approval',
+  'Community Engagement': 'engagement',
+  'Due Diligence Study': 'due_diligence',
+  'Planning Analysis': 'planning_analysis',
+  'Transit-Oriented Development': 'transit_oriented_development',
+};
+const COUNTRY_FIELD = 'country';
+const WARDS_URL = 'wards.geojson';            // Toronto 25 wards, GeoJSON in WGS84 (EPSG:4326), same folder as this page
+const WARD_PROPS = ['AREA_SHORT_CODE', 'AREA_S_CD', 'WARD', 'ward'];   // property holding the ward number (first one found is used)
 
 // Checkbox groups (several boxes sharing one name, e.g. project_type):
 // true  -> saved as one text value, "Urban Design, Master Planning"
@@ -47,7 +59,7 @@ export function formToRow(formEl) {
     if (el.type === 'checkbox' && el.name) cbCount[el.name] = (cbCount[el.name] || 0) + 1;
   }
   for (const el of formEl.elements) {
-    if (!el.name || el.disabled || ['submit', 'button', 'reset'].includes(el.type)) continue;
+    if (!el.name || el.matches(':disabled') || ['submit', 'button', 'reset'].includes(el.type)) continue;   // :disabled also catches inputs inside a disabled <fieldset>
     if (el.type === 'checkbox') {
       if (cbCount[el.name] > 1) {                       // group -> list of checked values
         row[el.name] ??= [];
@@ -57,7 +69,10 @@ export function formToRow(formEl) {
       }
       continue;
     }
-    if (el.type === 'radio') { if (el.checked) row[el.name] = el.value; continue; }
+    if (el.type === 'radio') {                         // Yes/No pairs -> real booleans; none picked -> left out (NULL)
+      if (el.checked) row[el.name] = el.value === 'true' ? true : el.value === 'false' ? false : el.value;
+      continue;
+    }
     const v = (el.value ?? '').trim();
     if (v === '') row[el.name] = null;                 // blank -> NULL (or DB default)
     else if (el.type === 'number') row[el.name] = Number(v);
@@ -79,6 +94,7 @@ function setPin(lng, lat, city) {
   pin = { lng: Number(lng.toFixed(6)), lat: Number(lat.toFixed(6)) };
   if (coordsEl) coordsEl.textContent = `Pin: ${pin.lat}, ${pin.lng} (lat, lng)`;
   if (city !== undefined) setCity(city); else scheduleCityLookup();
+  setWard(pin.lng, pin.lat);
   if (!map) return;
   if (!marker) {
     marker = new mapboxgl.Marker({ draggable: true }).setLngLat([lng, lat]).addTo(map);
@@ -131,13 +147,13 @@ export async function findAddress(query) {
   const results = await nominatim('search', { q: query, format: 'jsonv2', limit: '1', addressdetails: '1' });
   if (!results.length) throw new Error(`No match for "${query}". Try adding city/country, or place the pin by hand.`);
   const r = results[0];
-  return { lat: Number(r.lat), lng: Number(r.lon), label: r.display_name, city: cityFromAddress(r.address) };
+  return { lat: Number(r.lat), lng: Number(r.lon), label: r.display_name, city: cityFromAddress(r.address), country: r.address?.country ?? '' };
 }
 
 // Coordinates -> { city, address } (zoom=18 = building-level detail; still includes city)
 export async function placeAt(lat, lng) {
   const r = await nominatim('reverse', { lat, lon: lng, format: 'jsonv2', zoom: '18', addressdetails: '1' });
-  return { city: cityFromAddress(r.address), address: streetFromAddress(r.address) };
+  return { city: cityFromAddress(r.address), address: streetFromAddress(r.address), country: r.address?.country ?? '' };
 }
 
 // "65 Front Street West, Toronto" (or "Bay Street, Toronto" if no house number)
@@ -158,6 +174,14 @@ function setAddressFromPin(addr) {
   }
 }
 
+// Country follows the pin unless the user typed their own
+const countryInput = form?.elements[COUNTRY_FIELD];
+countryInput?.addEventListener('input', () => delete countryInput.dataset.auto);
+function setCountryFromPin(c) {
+  if (!countryInput || !c) return;
+  if (countryInput.value.trim() === '' || countryInput.dataset.auto) { countryInput.value = c; countryInput.dataset.auto = '1'; }
+}
+
 function setCity(city) {
   const input = form?.elements[LOCATION_FIELD];
   if (input) input.value = city;
@@ -174,8 +198,8 @@ function scheduleCityLookup() {
   cityTimer = setTimeout(async () => {
     const at = pin;
     try {
-      const { city, address } = await placeAt(at.lat, at.lng);
-      if (pin === at) { setCity(city); setAddressFromPin(address); }
+      const { city, address, country } = await placeAt(at.lat, at.lng);
+      if (pin === at) { setCity(city); setAddressFromPin(address); setCountryFromPin(country); }
       if (input && !city) input.placeholder = 'No city found — type it in';
     } catch (err) {
       console.error(err);
@@ -196,8 +220,9 @@ if (findBtn) {
     findBtn.disabled = true;
     findStatusEl.textContent = 'Searching…';
     try {
-      const { lat, lng, label, city } = await findAddress(query);
+      const { lat, lng, label, city, country } = await findAddress(query);
       setPin(lng, lat, city);
+      setCountryFromPin(country);
       if (map) map.flyTo({ center: [lng, lat], zoom: 16 });
       findStatusEl.textContent = `Found: ${label}. Drag the pin if it's not exactly on the site (the address stays as typed).`;
     } catch (err) {
@@ -207,6 +232,67 @@ if (findBtn) {
     }
   });
 }
+
+// ---------- Ward lookup (point-in-polygon against wards.geojson) ----------
+let wardsPromise = null;
+function loadWards() {
+  wardsPromise ??= fetch(WARDS_URL)
+    .then((r) => { if (!r.ok) throw new Error(`HTTP ${r.status}`); return r.json(); })
+    .catch((err) => { console.warn(`Could not load ${WARDS_URL}:`, err.message); return null; });
+  return wardsPromise;
+}
+
+// Ray casting: is [x, y] inside one ring of [lng, lat] pairs?
+function inRing([x, y], ring) {
+  let inside = false;
+  for (let i = 0, j = ring.length - 1; i < ring.length; j = i++) {
+    const [xi, yi] = ring[i], [xj, yj] = ring[j];
+    if ((yi > y) !== (yj > y) && x < ((xj - xi) * (y - yi)) / (yj - yi) + xi) inside = !inside;
+  }
+  return inside;
+}
+// Polygon = outer ring + holes; MultiPolygon = list of polygons
+function inPolygon(pt, rings) { return inRing(pt, rings[0]) && !rings.slice(1).some((h) => inRing(pt, h)); }
+export function wardAt(lng, lat, geojson) {
+  for (const f of geojson?.features ?? []) {
+    const g = f.geometry; if (!g) continue;
+    const polys = g.type === 'Polygon' ? [g.coordinates] : g.type === 'MultiPolygon' ? g.coordinates : [];
+    if (polys.some((p) => inPolygon([lng, lat], p))) {
+      const key = WARD_PROPS.find((k) => f.properties?.[k] != null);
+      return key ? String(parseInt(f.properties[key], 10)) : null;   // "01" -> "1" to match the <select>
+    }
+  }
+  return null;
+}
+
+async function setWard(lng, lat) {
+  const sel = document.querySelector('#ward');
+  const msg = document.querySelector('#ward-status');
+  if (!sel) return;
+  const at = pin;
+  const geo = await loadWards();
+  if (pin !== at) return;                          // pin moved while loading
+  if (!geo) { if (msg) msg.textContent = 'Ward lookup unavailable — pick it manually.'; return; }
+  const ward = wardAt(lng, lat, geo);
+  sel.value = ward ?? '';
+  if (msg) msg.textContent = ward ? `Ward ${ward} (from the pin). Change it if it's wrong.` : 'Pin is outside Toronto wards.';
+}
+loadWards();
+
+// ---------- Affordable Units (%) = affordable / residential × 100 ----------
+const resEl = form?.elements['residential_units'];
+const affEl = form?.elements['affordable_units'];
+const pctEl = form?.elements['affordable_units_pct'];
+export function affordablePct(res, aff) {
+  if (!(res > 0) || !(aff >= 0)) return '';
+  return String(Math.round((aff / res) * 1000) / 10);   // 1 decimal place
+}
+function updatePct() {
+  if (!pctEl) return;
+  pctEl.value = affordablePct(Number(resEl?.value === '' ? NaN : resEl?.value), Number(affEl?.value === '' ? NaN : affEl?.value));
+}
+resEl?.addEventListener('input', updatePct);
+affEl?.addEventListener('input', updatePct);
 
 // ---------- Client Type suggestions (from values already in the table) ----------
 export async function loadClientTypes() {
@@ -225,6 +311,20 @@ export function checkDates(row) {
   if (start && end && end < start) return 'Project End Date is before the Start Date.';   // YYYY-MM-DD compares correctly as text
   return '';
 }
+
+export function todayISO(d = new Date()) {
+  const p = (n) => String(n).padStart(2, '0');
+  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`;
+}
+
+// ---------- Yes/No radios: click a selected answer again to clear it (back to NULL) ----------
+const lastPicked = new Map();
+form?.addEventListener('click', (e) => {
+  const el = e.target;
+  if (el.type !== 'radio' || !el.closest('.flags')) return;
+  if (lastPicked.get(el.name) === el) { el.checked = false; lastPicked.delete(el.name); }
+  else lastPicked.set(el.name, el);
+});
 
 // ---------- Submit ----------
 function showStatus(msg, isError = false) {
@@ -249,10 +349,25 @@ if (form) {
         row[CLIENT_TYPE_FIELD] = existing.find(v => v.trim().toLowerCase() === typedType.toLowerCase()) ?? typedType;
       }
 
+      // Project Type -> matching flag columns: checked = true, unchecked = false (left NULL if no real type picked)
+      const picked = [...form.querySelectorAll('input[name="project_type"]:checked')].map((c) => c.value);
+      if (picked.some((v) => v in PROJECT_TYPE_FLAGS)) {
+        for (const [type, col] of Object.entries(PROJECT_TYPE_FLAGS)) row[col] = picked.includes(type);
+      }
+
+      row.in_toronto = row[LOCATION_FIELD] ? row[LOCATION_FIELD].toLowerCase().startsWith('toronto') : null;
+      row.date = todayISO();                            // submission date, local time
+
+      if (row.min_non_res_gfa != null && row.max_non_res_gfa != null && row.min_non_res_gfa > row.max_non_res_gfa)
+        throw new Error('Min. Non-Residential GFA is larger than Max.');
+      if (row.residential_units != null && row.affordable_units > row.residential_units)
+        throw new Error('Affordable Units can\'t be more than Residential Units.');
+
       const dateProblem = checkDates(row);
       if (dateProblem) throw new Error(dateProblem);
       row[LAT_COLUMN] = pin.lat;
       row[LNG_COLUMN] = pin.lng;
+      row.centroid_coords = `(${pin.lng}, ${pin.lat})`;   // "(long, lat)"
 
       showStatus('Saving…');
       const { error } = await supabase.from(TABLE).insert(row);
@@ -263,6 +378,9 @@ if (form) {
       showStatus('Project added.');
       form.reset();
       clearPin();
+      lastPicked.clear();
+      delete countryInput?.dataset.auto;
+      delete addressInput?.dataset.auto;
       if (findStatusEl) findStatusEl.textContent = '';
     } catch (err) {
       console.error(err);
